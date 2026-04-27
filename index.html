@@ -953,9 +953,9 @@ body {
     </div>
     <div class="card">
       <div class="fg">
-        <label class="label" data-i18n="otp_placeholder">4-Digit OTP</label>
-        <input class="otp-inp" id="i-otp" type="tel" inputmode="numeric" maxlength="4" placeholder="&#xB7; &#xB7; &#xB7; &#xB7;" data-i18n="otp_placeholder">
-        <div class="err" id="e-otp">Please enter a 4-digit OTP</div>
+        <label class="label" data-i18n="otp_placeholder">6-Digit OTP</label>
+        <input class="otp-inp" id="i-otp" type="tel" inputmode="numeric" maxlength="6" placeholder="&#xB7; &#xB7; &#xB7; &#xB7; &#xB7; &#xB7;" data-i18n="otp_placeholder">
+        <div class="err" id="e-otp">Please enter the 6-digit OTP</div>
       </div>
       <button class="btn" onclick="verifyOTP()" data-i18n="otp_btn">Verify &amp; Continue &rarr;</button>
       <div style="text-align:center;margin-top:18px;">
@@ -1455,27 +1455,63 @@ function goOTP() {
   document.getElementById('e-phone').classList.remove('show');
   S.name = name; S.phone = phone;
   saveState();
-  document.getElementById('otp-desc').textContent = T('otp_subtitle') + ' +91 ' + phone;
-  document.getElementById('i-otp').value = '';
-  show('s-otp');
+
+  var btn = document.querySelector('#s-entry .btn');
+  btn.textContent = 'Sending OTP…'; btn.disabled = true;
+
+  // Set up invisible reCAPTCHA (required by Firebase, user never sees it)
+  if (!window._appVerifier) {
+    window._appVerifier = new window._RecaptchaVerifier(window._fbAuth, 'recaptcha-container', { size: 'invisible' });
+  }
+
+  window._signInWithPhoneNumber(window._fbAuth, '+91' + phone, window._appVerifier)
+    .then(function(result) {
+      window._confirmationResult = result;
+      document.getElementById('otp-desc').textContent = T('otp_subtitle') + ' +91 ' + phone;
+      document.getElementById('i-otp').value = '';
+      show('s-otp');
+      btn.textContent = 'Get OTP \u2192'; btn.disabled = false;
+    })
+    .catch(function(err) {
+      console.error('OTP send error:', err);
+      toast('Could not send OTP. Please try again.');
+      btn.textContent = 'Get OTP \u2192'; btn.disabled = false;
+      // Reset verifier so next attempt works clean
+      window._appVerifier = null;
+    });
 }
 
 function verifyOTP() {
   var otp = document.getElementById('i-otp').value.trim();
-  if (otp.length !== 4) { document.getElementById('e-otp').classList.add('show'); return; }
+  if (otp.length !== 6) { document.getElementById('e-otp').classList.add('show'); return; }
   document.getElementById('e-otp').classList.remove('show');
-  
-  // Simulated Profile Sync
-  var profiles = JSON.parse(localStorage.getItem('ASH_USER_PROFILES') || '{}');
-  if (profiles[S.phone]) { 
-    toast((S.lang === 'hi' ? 'वापसी पर स्वागत है, ' : 'Welcome back, ') + S.name + '!'); 
-    S.email = profiles[S.phone].email || ''; 
-  }
-  
-  document.getElementById('d-name').value = S.name;
-  document.getElementById('d-phone').value = S.phone;
-  document.getElementById('d-email').value = S.email || '';
-  show('s-details');
+
+  if (!window._confirmationResult) { toast('Please request OTP first.'); return; }
+
+  var btn = document.querySelector('#s-otp .btn');
+  btn.textContent = 'Verifying…'; btn.disabled = true;
+
+  window._confirmationResult.confirm(otp)
+    .then(function() {
+      // Simulated Profile Sync
+      var profiles = JSON.parse(localStorage.getItem('ASH_USER_PROFILES') || '{}');
+      if (profiles[S.phone]) {
+        toast((S.lang === 'hi' ? 'वापसी पर स्वागत है, ' : 'Welcome back, ') + S.name + '!');
+        S.email = profiles[S.phone].email || '';
+      }
+      document.getElementById('d-name').value = S.name;
+      document.getElementById('d-phone').value = S.phone;
+      document.getElementById('d-email').value = S.email || '';
+      show('s-details');
+      btn.textContent = 'Verify & Continue \u2192'; btn.disabled = false;
+    })
+    .catch(function(err) {
+      console.error('OTP verify error:', err);
+      var eEl = document.getElementById('e-otp');
+      eEl.textContent = 'Incorrect OTP. Please try again.';
+      eEl.classList.add('show');
+      btn.textContent = 'Verify & Continue \u2192'; btn.disabled = false;
+    });
 }
 
 // -- MCQ --
@@ -1813,5 +1849,35 @@ function closeModal() {
 </div>
 
 <script src="lang.js"></script>
+
+<!-- Hidden reCAPTCHA container required by Firebase Phone Auth -->
+<div id="recaptcha-container" style="display:none;"></div>
+
+<!-- Firebase Phone Auth -->
+<script type="module">
+  import { initializeApp } from "https://www.gstatic.com/firebasejs/12.12.1/firebase-app.js";
+  import { getAuth, signInWithPhoneNumber, RecaptchaVerifier } from "https://www.gstatic.com/firebasejs/12.12.1/firebase-auth.js";
+
+  const firebaseConfig = {
+    apiKey: "AIzaSyB25EH1WGj8m7UrL2W_t2cKtu2EI56shHA",
+    authDomain: "aashirvaadkiosk.firebaseapp.com",
+    projectId: "aashirvaadkiosk",
+    storageBucket: "aashirvaadkiosk.firebasestorage.app",
+    messagingSenderId: "561451242597",
+    appId: "1:561451242597:web:c5cd208580ffda3cfd628c",
+    measurementId: "G-9EJ30ZMTCJ"
+  };
+
+  const app = initializeApp(firebaseConfig);
+  const auth = getAuth(app);
+  auth.languageCode = 'en';
+
+  // Expose to global scope so the classic script can use them
+  window._fbAuth = auth;
+  window._RecaptchaVerifier = RecaptchaVerifier;
+  window._signInWithPhoneNumber = signInWithPhoneNumber;
+  window._confirmationResult = null;
+  window._appVerifier = null;
+</script>
 </body>
 </html>
